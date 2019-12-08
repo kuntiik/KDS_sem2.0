@@ -77,9 +77,9 @@ int main(int argc, char **argv) {
   strcat(buffer_tx, argv[1]);
   compute_crc(buffer_tx, crc, 5 + strlen(argv[1]), 4);
 
-  // transfer_msg(sd, buffer_tx, buffer_rx, BUFFER_S, &server, server_len);
-  sendto(sd, buffer_tx, strlen(argv[1]) + MSG_and_CRC, MSG_DONTWAIT,
-         (struct sockaddr *)&server, server_len);
+   transfer_msg(sd, buffer_tx, buffer_rx, strlen(argv[1]) +MSG_and_CRC, &server, server_len);
+  //sendto(sd, buffer_tx, strlen(argv[1]) + MSG_and_CRC, MSG_DONTWAIT,
+         //(struct sockaddr *)&server, server_len);
 
   printf("sending file with name %s\n", buffer_tx);
 
@@ -93,17 +93,18 @@ int main(int argc, char **argv) {
   strcat(buffer_tx, to_string(file_length).c_str());
 
   compute_crc(buffer_tx, crc, 5 + strlen(to_string(file_length).c_str()), 4);
-  // transfer_msg(sd, buffer_tx, buffer_rx, BUFFER_S, &server, server_len);
-  sendto(sd, buffer_tx, strlen(argv[1]) + MSG_and_CRC, MSG_DONTWAIT,
-         (struct sockaddr *)&server, server_len);
+  cout << "size of size msg" << strlen(to_string(file_length).c_str()) + MSG_and_CRC << endl;
+   transfer_msg(sd, buffer_tx, buffer_rx, strlen(to_string(file_length).c_str())+ MSG_and_CRC , &server, server_len);
+  //sendto(sd, buffer_tx, strlen(argv[1]) + MSG_and_CRC, MSG_DONTWAIT,
+         //(struct sockaddr *)&server, server_len);
 
   ////////////////////////////////////////////////////// HASH
   // nacteni celeho souboru, zaheshovani a poslani hash zpravy
 
   send_hash(sd, buffer_tx, &server, server_len, fd, file_length);
-  // transfer_msg(sd, buffer_tx, buffer_rx, 29, &server, server_len);
-  sendto(sd, buffer_tx, MSG_HASH_SIZE, MSG_DONTWAIT, (struct sockaddr *)&server,
-         server_len);
+   transfer_msg(sd, buffer_tx, buffer_rx, 29, &server, server_len);
+  //sendto(sd, buffer_tx, MSG_HASH_SIZE, MSG_DONTWAIT, (struct sockaddr *)&server,
+         //server_len);
   ////////////////////////////////////////////////////////////////////
 
   // some constants needed further
