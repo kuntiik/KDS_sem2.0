@@ -93,73 +93,68 @@ int main(void) {
   server_len = sizeof(server);
   // main loop todo: another type of message, that exits the loop AKA msg_type
   // EXIT
-  //while (true) {
-    printf("Čekám na packet od klienta ...\n");
-    // parse msg with name and size todo: add crc to client and server
-    File_informations fi;
-    while (fi.rcv_hash == false || fi.rcv_name == false ||
-           fi.rcv_size == false) {
-      parse_msg(buffer_rx, sd, buffer_tx, &client, client_len, &fi);
+  // while (true) {
+  printf("Čekám na packet od klienta ...\n");
+  // parse msg with name and size todo: add crc to client and server
+  File_informations fi;
+  while (fi.rcv_hash == false || fi.rcv_name == false || fi.rcv_size == false) {
+    parse_msg(buffer_rx, sd, buffer_tx, &client, client_len, &fi);
+  }
+  fi.file_data = (unsigned char *)malloc(fi.size);
+  trans_end = false;
+  // have name and size, now get data
+  bool CRCerror;
+  while (!trans_end) {
+    CRCerror = false;
+    ret = recvfrom(sd, &buffer_rx, sizeof(buffer_rx), 0,
+                   (struct sockaddr *)&client, &client_len);
+
+    cout << endl;
+    for (int i = NUM_IDX; i < NUM_IDX + 4; i++) {
+      num_packet[i - NUM_IDX] = buffer_rx[i];
     }
-    fi.file_data = (unsigned char *)malloc(fi.size);
-    trans_end = false;
-    // have name and size, now get data
-    bool CRCerror;
-    while (!trans_end) {
-      CRCerror = false;
-      ret = recvfrom(sd, &buffer_rx, sizeof(buffer_rx), 0,
-                     (struct sockaddr *)&client, &client_len);
+    CRCerror = check_crc(buffer_rx, ret, 8);
 
-      cout << endl;
-      for (int i = NUM_IDX; i < NUM_IDX + 4; i++) {
-        num_packet[i - NUM_IDX] = buffer_rx[i];
-      }
-      CRCerror = check_crc(buffer_rx, ret, 8);
-
-      if (!CRCerror) {
-        send_resend(sd, buffer_tx, &client, client_len);
+    if (!CRCerror) {
+      send_resend(sd, buffer_tx, &client, client_len);
+    } else {
+      // number of packet recieved, decide what to do now (ack, or error)
+      rec_packet_num = atoi(num_packet);
+      if (fi.last_packet_num < rec_packet_num) {
+        cout << "Packekt number error, server exiting" << endl;
+        // return -1;
+      } else if (fi.last_packet_num > rec_packet_num) {
+        // send another ack message
+        send_ACK(sd, buffer_tx, &client, client_len);
       } else {
-        // number of packet recieved, decide what to do now (ack, or error)
-        rec_packet_num = atoi(num_packet);
-        if (fi.last_packet_num < rec_packet_num) {
-          cout << "Packekt number error, server exiting" << endl;
-          // return -1;
-        } else if (fi.last_packet_num > rec_packet_num) {
-          // send another ack message
-          send_ACK(sd, buffer_tx, &client, client_len);
-        } else {
-          send_ACK(sd, buffer_tx, &client, client_len);
-          for (int i = DAT_IDX; i < ret; i++) {
-            c = buffer_rx[i];
-            fi.file_data[fi.index] = c;
-            fi.index++;
-            if (fi.index == fi.size) {
-              trans_end = true;
-            }
+        send_ACK(sd, buffer_tx, &client, client_len);
+        for (int i = DAT_IDX; i < ret; i++) {
+          c = buffer_rx[i];
+          fi.file_data[fi.index] = c;
+          fi.index++;
+          if (fi.index == fi.size) {
+            trans_end = true;
           }
-          fi.last_packet_num++;
         }
+        fi.last_packet_num++;
       }
     }
-    for (int i = 0; i < fi.size; i++) {
-      cout << fi.file_data[i];
-      putc(fi.file_data[i], fi.file);
+  }
+  for (int i = 0; i < fi.size; i++) {
+    putc(fi.file_data[i], fi.file);
+  }
+
+  SHA1(fi.file_data, fi.size, (unsigned char *)fi.computed_hash);
+  int hash_match = 1;
+  for (int i = 0; i < 20; i++) {
+    if ((int)fi.computed_hash[i] != (int)fi.hash[i]) {
+      hash_match = 0;
+      break;
     }
-
-    SHA1(fi.file_data, fi.size, (unsigned char *)fi.computed_hash);
-    int hash_match = 1;
-    for (int i = 0; i < 20; i++) {
-      if ((int)fi.computed_hash[i] != (int)fi.hash[i]) {
-        hash_match = 0;
-        break;
-      }
-    }
-    cout << endl << hash_match << endl;
-
-    free(fi.file_data);
-
-    fclose(fi.file);
-  //}
+  }
+  cout << endl << "HASH sedi" << hash_match << endl;
+  free(fi.file_data);
+  fclose(fi.file);
   return 0;
 }
 
@@ -185,8 +180,6 @@ void send_resend(int sd, char *buffer_tx, struct sockaddr_in *client,
 int parse_msg(char *buffer_rx, int sd, char *buffer_tx,
               struct sockaddr_in *client, socklen_t client_len,
               File_informations *fi) {
-  // TODO check if you have all messages need aka name hash, some kind of
-  // timeout if i am recieving dat aleready
   char name_msg[] = "NAME=";
   char hash_msg[] = "HASH=";
   char size_msg[] = "SIZE=";
@@ -223,8 +216,8 @@ int parse_msg(char *buffer_rx, int sd, char *buffer_tx,
     memset(name, 0, 1000);
     strcpy(name, path);
     strcat(name, msg_data);
-    for(int i = 9; i < ret; i++){
-        name[strlen(path)-9+i] = buffer_rx[i];
+    for (int i = 9; i < ret; i++) {
+      name[strlen(path) - 9 + i] = buffer_rx[i];
     }
     name[strlen(path) - 9 + ret] = 0;
     fi->file = fopen(name, "w");
@@ -247,139 +240,6 @@ int parse_msg(char *buffer_rx, int sd, char *buffer_tx,
   }
   return 0;
 }
-//// TODO CRCcko je tu implementovane.. jeho vysledek je v CRCerroru- nejak
-/// zpracovat ten vysledek (poslat ACK nebo neco nevim)
-// char *parse_name(char *buffer_rx, int size){
-// char crc_data[4];
-// char name_data[size - 9];
-
-// for(int i = 0; i < 4; i++){
-// crc_data[i] = buffer_rx[i];
-//}
-//}
-FILE *open_file(int sd, char *buffer_rx, char *buffer_tx,
-                struct sockaddr_in *client, socklen_t client_len) {
-  char name_msg[] = "NAME=";
-  char path[] = "out/";
-  char name[1000];
-  int ret = recvfrom(sd, buffer_rx, BUFFER_S, 0, (struct sockaddr *)client,
-                     &client_len);
-
-  bool CRCerror = check_crc(buffer_rx, ret, 4);
-  while (!CRCerror) {
-    // send_resend(char *buffer, int b_size, int s_size, int sd,
-    // struct sockaddr *server) send_resend(buffer_tx, ) int ret =
-    recvfrom(sd, buffer_rx, BUFFER_S, 0, (struct sockaddr *)client,
-             &client_len);
-  }
-
-  int name_len = strlen(buffer_rx);
-
-  char check_name[6];
-  for (int i = 0; i < 5; i++) {
-    check_name[i] = buffer_rx[i + 4];
-  }
-  check_name[5] = '\0';
-  int is_same = strcmp(check_name, name_msg);
-  if (is_same != 0) {
-    cout << "not NAME" << endl;
-    return NULL;
-  }
-  memset(name, 0, 1000);
-  strcpy(name, path);
-  for (int i = 0; i < name_len - 5; i++) {
-    name[strlen(path) + i] = buffer_rx[5 + i];
-  }
-  name[name_len + 5] = 0;
-  cout << name << endl;
-  FILE *fd = fopen(name, "w");
-  return fd;
-}
-
-///
-/// Jsou tri rano a napadaji me zajimave veci
-///  napr u open_file u crcka zjistuju velikost bufferu z ktereho delam crcko
-///  zjistuju to pomoci strlen, ktery hleda takovej ten stringovskej znak na
-///  konci zejo CO KDYBY NAHOOODOU crcko zrovna vyslo tak, ze to bude cislo
-///  odpovidajici tomu stringovskemu konci
-/// hmmmmmmmmmm zamyslet see
-
-//// TODO CRCcko je tu implementovane.. jeho vysledek je v CRCerroru- nejak
-/// zpracovat ten vysledek (poslat ACK nebo neco nevim)
-int get_file_size(int sd, char *buffer_rx, char *buffer_tx,
-                  struct sockaddr_in *client, socklen_t client_len) {
-  char size_msg[] = "SIZE=";
-  char c_size[100];
-  int ret = recvfrom(sd, buffer_rx, BUFFER_S, 0, (struct sockaddr *)client,
-                     &client_len);
-
-  for (int i = 0; i < 1024; i++) {
-    cout << buffer_rx[i] << ":";
-  }
-
-  //// TODO POZOR POZOR SIZE_LEN JE NAHARDCODENE, funguje jen pro test.txt..
-  /// OPRAVIT ASAP
-  int size_len = sizeof(buffer_rx) + 5;
-  bool CRCerror = check_crc(buffer_rx, size_len, 4);
-
-  cout << "this is size" << size_len;
-
-  char check_size[6];
-  for (int i = 0; i < 5; i++) {
-    check_size[i] = buffer_rx[i + 4];
-  }
-  check_size[5] = '\0';
-  int is_same_num = strcmp(check_size, size_msg);
-  if (is_same_num != 0) {
-    cout << "not SIZE" << endl;
-    return -1;
-  }
-  for (int i = 9; i < size_len; i++) {
-    c_size[i - 9] = buffer_rx[i];
-  }
-  int msg_length = atoi(c_size);
-  int transf = msg_length;
-  cout << "function return size of file: " << transf << endl;
-  return transf;
-}
-
-//// TODO CRCcko je tu implementovane.. jeho vysledek je v CRCerroru- nejak
-/// zpracovat ten vysledek (poslat ACK nebo neco nevim)
-int get_hash(int sd, char *buffer_rx, char *buffer_tx,
-             struct sockaddr_in *client, socklen_t client_len, char *hash) {
-  // returns 0 if everithing is ok or -x in case of some problem
-  char hash_msg[] = "HASH=";
-  char crc_data[4];
-  char verify_hash[6];
-  int ret = recvfrom(sd, buffer_rx, BUFFER_S, 0, (struct sockaddr *)client,
-                     &client_len);
-
-  bool CRCerror = check_crc(buffer_rx, 29, 4);
-
-  if (ret != 29) {
-    cout << "Hash msg length does not match" << endl;
-    return -100;
-  }
-  // load crc
-
-  for (int i = 0; i < 4; i++) {
-    crc_data[i] = buffer_rx[i];
-  }
-  for (int i = 4; i < 9; i++) {
-    verify_hash[i - 4] = buffer_rx[i];
-  }
-  for (int i = 9; i < 9 + HASH_S; i++) {
-    hash[i - 9] = buffer_rx[i];
-  }
-  if (strcmp(hash_msg, verify_hash) != 0) {
-    cout << "Not HASH=" << endl;
-    return -1;
-  }
-
-  // TODO check for crc, if it does not match return -1 and ask for resend
-  return 0;
-}
-
 int *compute_crc(char *buffer, unsigned long crc, int buffer_len) {
   unsigned char data[buffer_len];
   for (int i = 0; i < buffer_len; i++) {
@@ -432,11 +292,4 @@ bool check_crc(char *buffer_rx, int ret, int data_start) {
   } else {
     return false;
   }
-
-  // // // hlavni TODO
-  //  radek 273, prosim mrkni, byl uz sem ztracenej
-  //  v kazdy funkci(get_hash, get_size, open:file) je implementovany CRCko a
-  //  hozene do CRCerror (false je error, true je ok), chce to tam dodelat
-  //  poslani nejake zpravy a v cleinotvi pripadne resetnd noo a dal me uz asi
-  //  nic nenapada
 }
