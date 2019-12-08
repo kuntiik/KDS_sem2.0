@@ -108,8 +108,6 @@ int main(void) {
     CRCerror = false;
     ret = recvfrom(sd, &buffer_rx, sizeof(buffer_rx), 0,
                    (struct sockaddr *)&client, &client_len);
-
-    cout << endl;
     for (int i = NUM_IDX; i < NUM_IDX + 4; i++) {
       num_packet[i - NUM_IDX] = buffer_rx[i];
     }
@@ -117,6 +115,7 @@ int main(void) {
 
     if (!CRCerror) {
       send_resend(sd, buffer_tx, &client, client_len);
+      cout << "CRC error" << endl;
     } else {
       // number of packet recieved, decide what to do now (ack, or error)
       rec_packet_num = atoi(num_packet);
