@@ -11,8 +11,11 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <zlib.h>
-
-#define PORT 50505
+#define IPV4 "127.0.0.1"
+#define LOCAL_PORT 30000
+#define PORT 50000
+// NETDERPER ACK SOURCE - 50 000
+// NETDERPER ACK TARGET - 10 000
 #define BUFFER_S 1024
 #define HASH_S 20
 #define NUM_IDX 4
@@ -60,13 +63,14 @@ int get_hash(int sd, char *buffer_rx, char *buffer_tx,
              struct sockaddr_in *client, socklen_t client_len, char *hash);
 bool check_crc(char *buffer_rx, int ret, int data_start);
 int parse_msg(char *buffer_rx, int sd, char *buffer_tx,
-              struct sockaddr_in *client, socklen_t client_len,
+              struct sockaddr_in *client, socklen_t client_len,struct sockaddr_in *local, socklen_t local_len,
               File_informations *fi);
 
 int main(void) {
   // variables
-  struct sockaddr_in server, client;
-  socklen_t client_len, server_len;
+  struct sockaddr_in local;
+  struct sockaddr_in client;
+  socklen_t client_len, local_len;
   int ret, rec_packet_num, last_packet_num;
   char buffer_tx[BUFFER_S];
   char buffer_rx[BUFFER_S];
@@ -76,21 +80,33 @@ int main(void) {
   char ACK[] = "ACK";
   bool trans_end = false, retransmit = false;
   char num_packet[4];
+sd = socket(AF_INET, SOCK_DGRAM, 0);
 
-  // setting up the socket
-  memset(&server, 0, sizeof(server));
-  server.sin_family = AF_INET;
-  server.sin_addr.s_addr = htonl(INADDR_ANY);
-  server.sin_port = htons(PORT);
-  sd = socket(AF_INET, SOCK_DGRAM, 0);
-  bind(sd, (struct sockaddr *)&server, sizeof(server));
+
+
+
+  memset(&client,0,sizeof(client));
+  client.sin_family = AF_INET;
+  client.sin_port = htons(PORT);
+	client.sin_addr.s_addr = inet_addr(IPV4);
+
+  memset(&local,0,sizeof(local));
+  local.sin_family = AF_INET;
+	local.sin_port = htons(LOCAL_PORT);
+	local.sin_addr.s_addr = INADDR_ANY;
+
+
+  bind(sd, (struct sockaddr *)&local, sizeof(local));
+
+
 
   // vubec nevim
   // signal(int __sig, __sighandler_t __handler)
   signal(SIGINT, (__sighandler_t)closeServerHandler);
 
   client_len = sizeof(client);
-  server_len = sizeof(server);
+  local_len = sizeof(local);
+
   // main loop todo: another type of message, that exits the loop AKA msg_type
   // EXIT
   // while (true) {
@@ -98,7 +114,7 @@ int main(void) {
   // parse msg with name and size todo: add crc to client and server
   File_informations fi;
   while (fi.rcv_hash == false || fi.rcv_name == false || fi.rcv_size == false) {
-    parse_msg(buffer_rx, sd, buffer_tx, &client, client_len, &fi);
+    parse_msg(buffer_rx, sd, buffer_tx, &client, client_len, &local, local_len, &fi);
   }
   fi.file_data = (unsigned char *)malloc(fi.size);
   trans_end = false;
@@ -107,7 +123,7 @@ int main(void) {
   while (!trans_end) {
     CRCerror = false;
     ret = recvfrom(sd, &buffer_rx, sizeof(buffer_rx), 0,
-                   (struct sockaddr *)&client, &client_len);
+                   (struct sockaddr *)&local, &local_len);
     for (int i = NUM_IDX; i < NUM_IDX + 4; i++) {
       num_packet[i - NUM_IDX] = buffer_rx[i];
     }
@@ -177,7 +193,7 @@ void send_resend(int sd, char *buffer_tx, struct sockaddr_in *client,
 }
 
 int parse_msg(char *buffer_rx, int sd, char *buffer_tx,
-              struct sockaddr_in *client, socklen_t client_len,
+              struct sockaddr_in *client, socklen_t client_len, struct sockaddr_in *local, socklen_t local_len,
               File_informations *fi) {
   char name_msg[] = "NAME=";
   char hash_msg[] = "HASH=";
@@ -188,13 +204,13 @@ int parse_msg(char *buffer_rx, int sd, char *buffer_tx,
   int ret;
   int timeout;
   timeout = 0;
-  ret = recvfrom(sd, buffer_rx, BUFFER_S, 0, (struct sockaddr *)client,
-                 &client_len);
+  ret = recvfrom(sd, buffer_rx, BUFFER_S, 0, (struct sockaddr *)local,
+                 &local_len);
   bool CRC_error = check_crc(buffer_rx, ret, 4);
   while (!CRC_error) {
     send_resend(sd, buffer_tx, client, client_len);
-    ret = recvfrom(sd, buffer_rx, BUFFER_S, 0, (struct sockaddr *)client,
-                   &client_len);
+    ret = recvfrom(sd, buffer_rx, BUFFER_S, 0, (struct sockaddr *)local,
+                   &local_len);
     CRC_error = check_crc(buffer_rx, ret, 4);
     timeout++;
     if (timeout > 100) {

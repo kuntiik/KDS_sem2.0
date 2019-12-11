@@ -15,7 +15,10 @@
 #include <zlib.h>
 #define IPV4 "127.0.0.1"
 //#define IPV4 "147.32.217.203"
-#define PORT 50505
+#define LOCAL_PORT 10000
+#define PORT 20000
+// NETDERPER DATA SOURCE - 20 000
+// NETDERPER DATA TARGET - 30 000
 #define BUFFER_S 1024
 #define DATA_IN_FRAME 1016
 #define NUM_IDX 4
@@ -27,15 +30,15 @@ using namespace std;
 
 // functions declaration
 void fill_buffer(int frame_num, int data_num, char *buffer_tx, FILE *fd);
-int wait_for_ack(int sd, char *buffer_rx, struct sockaddr_in *server,
-                 socklen_t server_len);
+int wait_for_ack(int sd, char *buffer_rx, struct sockaddr_in *local,
+                 socklen_t local_len);
 void compute_crc(char *buffer_tx, unsigned long crc, int buffer_len,
                  int data_start);
 void send_hash(int sd, char *buffer_tx, struct sockaddr_in *server,
                socklen_t server_len, FILE *fd, int file_length);
 
 int transfer_msg(int sd, char *buffer_tx, char *buffer_rx, int send_size,
-                 struct sockaddr_in *server, socklen_t server_len);
+                 struct sockaddr_in *server, socklen_t server_len,struct sockaddr_in *local, socklen_t local_len);
 
 int get_remaining(int nos, int file_length);
 
@@ -44,8 +47,9 @@ int main(int argc, char **argv) {
   int sd, ret, file_length, frames_num, current_frame = 0;
   // struct hostent *hp;
 
-  struct sockaddr_in server;
-  socklen_t server_len;
+  struct sockaddr_in server ;
+   struct sockaddr_in local ;
+  socklen_t server_len,local_len;
   FILE *fd;
   char c;
   char buffer_tx[BUFFER_S];
@@ -54,6 +58,23 @@ int main(int argc, char **argv) {
   char crc_val[4];
   char name_msg[] = "0000NAME=";
   char size_msg[] = "0000SIZE=";
+  sd = socket(AF_INET, SOCK_DGRAM, 0);
+
+
+  unsigned long int noBlock = 1;
+  ioctl(sd, FIONBIO, &noBlock);
+  memset(&server,0,sizeof(server));
+  server.sin_family = AF_INET;
+  server.sin_port = htons(PORT);
+	server.sin_addr.s_addr = inet_addr(IPV4);
+
+
+
+  memset(&local,0,sizeof(local));
+  local.sin_family = AF_INET;
+	local.sin_port = htons(LOCAL_PORT);
+	local.sin_addr.s_addr = INADDR_ANY;
+  bind(sd, (struct sockaddr *)&local, sizeof(local));
 
   unsigned long crc = crc32(0L, Z_NULL, 0);
   int buff = 0;
@@ -63,13 +84,10 @@ int main(int argc, char **argv) {
   fd = fopen(argv[1], "r");
   // set socket adress
   printf("Connect ...\n");
-  sd = socket(AF_INET, SOCK_DGRAM, 0);
+
   // set nonblocking
-  unsigned long int noBlock = 1;
-  ioctl(sd, FIONBIO, &noBlock);
-  server.sin_family = AF_INET;
-  server.sin_port = htons(PORT);
-  inet_aton(IPV4, &(server.sin_addr));
+   local_len = sizeof(local);
+
   server_len = sizeof(server);
 
   // send name of the file
@@ -77,7 +95,7 @@ int main(int argc, char **argv) {
   strcat(buffer_tx, argv[1]);
   compute_crc(buffer_tx, crc, 5 + strlen(argv[1]), 4);
 
-   transfer_msg(sd, buffer_tx, buffer_rx, strlen(argv[1]) +MSG_and_CRC, &server, server_len);
+   transfer_msg(sd, buffer_tx, buffer_rx, strlen(argv[1]) +MSG_and_CRC, &server, server_len,&local, local_len);
   //sendto(sd, buffer_tx, strlen(argv[1]) + MSG_and_CRC, MSG_DONTWAIT,
          //(struct sockaddr *)&server, server_len);
 
@@ -94,7 +112,7 @@ int main(int argc, char **argv) {
 
   compute_crc(buffer_tx, crc, 5 + strlen(to_string(file_length).c_str()), 4);
   cout << "size of size msg" << strlen(to_string(file_length).c_str()) + MSG_and_CRC << endl;
-   transfer_msg(sd, buffer_tx, buffer_rx, strlen(to_string(file_length).c_str())+ MSG_and_CRC , &server, server_len);
+   transfer_msg(sd, buffer_tx, buffer_rx, strlen(to_string(file_length).c_str())+ MSG_and_CRC , &server, server_len,&local, local_len);
   //sendto(sd, buffer_tx, strlen(argv[1]) + MSG_and_CRC, MSG_DONTWAIT,
          //(struct sockaddr *)&server, server_len);
 
@@ -102,7 +120,7 @@ int main(int argc, char **argv) {
   // nacteni celeho souboru, zaheshovani a poslani hash zpravy
 
   send_hash(sd, buffer_tx, &server, server_len, fd, file_length);
-   transfer_msg(sd, buffer_tx, buffer_rx, 29, &server, server_len);
+   transfer_msg(sd, buffer_tx, buffer_rx, 29, &server, server_len,&local, local_len);
   //sendto(sd, buffer_tx, MSG_HASH_SIZE, MSG_DONTWAIT, (struct sockaddr *)&server,
          //server_len);
   ////////////////////////////////////////////////////////////////////
@@ -120,7 +138,7 @@ int main(int argc, char **argv) {
     to_fill = get_remaining(nos, file_length);
     send_size = (size_t)(to_fill + 8);
     fill_buffer(current_frame, to_fill, buffer_tx, fd);
-    transfer_msg(sd, buffer_tx, buffer_rx, send_size, &server, server_len);
+    transfer_msg(sd, buffer_tx, buffer_rx, send_size, &server, server_len,&local, local_len);
     nos += to_fill;
     current_frame++;
   }
@@ -130,16 +148,16 @@ int main(int argc, char **argv) {
 }
 
 int transfer_msg(int sd, char *buffer_tx, char *buffer_rx, int send_size,
-                 struct sockaddr_in *server, socklen_t server_len) {
+                 struct sockaddr_in *server, socklen_t server_len,struct sockaddr_in *local, socklen_t local_len) {
   int ret, ack_rcv;
   ret = sendto(sd, buffer_tx, send_size, MSG_DONTWAIT,
                (struct sockaddr *)server, server_len);
   // wait for ack, if not recieved resend
-  ack_rcv = wait_for_ack(sd, buffer_rx, server, server_len);
+  ack_rcv = wait_for_ack(sd, buffer_rx, local, local_len);
   while (ack_rcv != 0) {
     ret = sendto(sd, buffer_tx, send_size, MSG_DONTWAIT,
                  (struct sockaddr *)server, server_len);
-    ack_rcv = wait_for_ack(sd, buffer_rx, server, server_len);
+    ack_rcv = wait_for_ack(sd, buffer_rx, local, local_len);
   }
   return 0;
 }
@@ -180,14 +198,14 @@ void fill_buffer(int frame_num, int data_num, char *buffer_tx, FILE *fd) {
   compute_crc(buffer_tx, crc, DAT_IDX + data_num - 8, 8);
 }
 
-int wait_for_ack(int sd, char *buffer_rx, struct sockaddr_in *server,
-                 socklen_t server_len) {
+int wait_for_ack(int sd, char *buffer_rx, struct sockaddr_in *local,
+                 socklen_t local_len) {
   char ack_msg[] = "ACK";
   char resend_msg[] = "RESEND";
   int ret;
   int time_out = 0;
-  ret = recvfrom(sd, buffer_rx, sizeof(buffer_rx), 0, (struct sockaddr *)server,
-                 &server_len);
+  ret = recvfrom(sd, buffer_rx, sizeof(buffer_rx), 0, (struct sockaddr *)local,
+                 &local_len);
   while (ret < 0) {
     usleep(10000);
     time_out += 10;
@@ -196,7 +214,7 @@ int wait_for_ack(int sd, char *buffer_rx, struct sockaddr_in *server,
       return 1;
     }
     ret = recvfrom(sd, buffer_rx, sizeof(buffer_rx), 0,
-                   (struct sockaddr *)server, &server_len);
+                   (struct sockaddr *)local, &local_len);
   }
   if (strcmp(ack_msg, buffer_rx) == 0) {
     return 0;
