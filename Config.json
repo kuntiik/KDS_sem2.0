@@ -1,12 +1,12 @@
 {
   "Data": {
     "Connection": { "SourcePort": 20000, "TargetPort": 30000, "TargetHostName": "127.0.0.1" },
-    "Manipulation": { "DropRate": 10, "ErrorRate": 0 },
+    "Manipulation": { "DropRate": 1, "ErrorRate": 20 },
     "Delay": { "Mean": 100.0, "StdDev": 15.0 }
   },
   "Acknowledgement": {
-    "Connection": { "SourcePort": 30000, "TargetPort": 50000, "TargetHostName": "127.0.0.1" },
-    "Manipulation": { "DropRate": 11, "ErrorRate": 0 },
+    "Connection": { "SourcePort": 50000, "TargetPort": 10000, "TargetHostName": "127.0.0.1" },
+    "Manipulation": { "DropRate": 1, "ErrorRate": 30 },
     "Delay": { "Mean": 101.0, "StdDev": 16.0 }
   }
 }
